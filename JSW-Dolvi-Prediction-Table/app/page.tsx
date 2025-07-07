@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Download, CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react"
+import { Download, CalendarIcon, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Filter } from "lucide-react"
 import { cn } from "@/lib/utils"
 import * as XLSX from "xlsx"
 import { DataAccess } from "connector-userid-ts"
@@ -236,7 +236,7 @@ function exportToExcel(data: any[], selectedDate: Date, predictionData: Record<n
         const overInjection = Math.max(0, totalInjection - actualConsumption);
         return overInjection.toFixed(1);
       }
-      return (Math.random() * 1500).toFixed(1);
+      return "N/A";
     })(),
     "MSEB (₹)": (() => {
       if (predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined) {
@@ -245,9 +245,47 @@ function exportToExcel(data: any[], selectedDate: Date, predictionData: Record<n
         const mseb = Math.max(0, actualConsumption - totalInjection);
         return mseb.toFixed(1);
       }
-      return Math.floor(Math.random() * 1000);
+      return "N/A";
     })(),
   }))
+
+  // Calculate totals for the exported data
+  let totalActualConsumption = 0
+  let totalOverInjection = 0
+  let totalMSEB = 0
+  let validDataCount = 0
+  
+  data.forEach((slot) => {
+    if (predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined) {
+      const actualConsumption = consumptionData[slot.slotNo]
+      const totalInjection = predictionData[slot.slotNo] * 0.9681
+      const overInjection = Math.max(0, totalInjection - actualConsumption)
+      const mseb = Math.max(0, actualConsumption - totalInjection)
+      
+      totalActualConsumption += actualConsumption
+      totalOverInjection += overInjection
+      totalMSEB += mseb
+      validDataCount++
+    }
+  })
+
+  // Add totals row
+  const totalsRow = {
+    Zone: "TOTAL",
+    "Time Slot": "",
+    "Slot No.": "",
+    "Final Prediction (kWh)": "",
+    "Total Injection Units (After loss-5.18%)": "",
+    "Actual Consumption (kWh)": validDataCount > 0 ? totalActualConsumption.toFixed(2) : "N/A",
+    "Final Prediction (MW)": "",
+    "Actual Consumption (MW)": "",
+    "Capped Actual Consumption (kWh)": "",
+    "Over Injection (kWh)": validDataCount > 0 ? totalOverInjection.toFixed(1) : "N/A",
+    "MSEB (₹)": validDataCount > 0 ? totalMSEB.toFixed(1) : "N/A",
+  }
+
+  // Add the totals row to the data
+  rows.push(totalsRow)
 
   // 2. build workbook / worksheet
   const wb = XLSX.utils.book_new()
@@ -282,6 +320,7 @@ export default function TrendAnalysis() {
   const [predictionData, setPredictionData] = useState<Record<number, number>>({})
   const [consumptionData, setConsumptionData] = useState<Record<number, number>>({})
   const [isLoading, setIsLoading] = useState(false)
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null)
   const datePickerRef = useRef<HTMLDivElement>(null)
 
   // Function to convert date to IST and get start/end times for API query
@@ -325,7 +364,7 @@ export default function TrendAnalysis() {
         const slotStartUTC = new Date(dayStartTime.getTime() + (slot - 1) * 15 * 60 * 1000);
         const slotEndUTC = new Date(dayStartTime.getTime() + slot * 15 * 60 * 1000);
         
-        const baseUrl = `https://datads.iosense.io/api/apiLayer/getStartEndDPV2`;
+        const baseUrl = `https://datads-ext.iosense.io/api/apiLayer/getStartEndDPV2`;
         
         // Create D12 API call
         const d12Params = new URLSearchParams({
@@ -408,8 +447,8 @@ export default function TrendAnalysis() {
       // Initialize DataAccess - TODO: Replace with actual credentials
       const dataAccess = new DataAccess({
         userId: "67e275d00faafe50ca744b29", // TODO: Replace with actual user ID
-        dataUrl: "datads.iosense.io", // TODO: Replace with actual data URL
-        dsUrl: "datads-sharded.iosense.io", // TODO: Replace with actual DS URL
+        dataUrl: "datads-ext.iosense.io", // TODO: Replace with actual data URL
+        dsUrl: "datads-ext.iosense.io", // TODO: Replace with actual DS URL
         tz: "UTC" // IST timezone
       });
       
@@ -473,8 +512,105 @@ export default function TrendAnalysis() {
 
   const timeSlots = generateTimeSlots()
   const filteredSlots = timeSlots.filter((slot) => selectedZones.includes(slot.zone))
-  const finalSlots = filteredSlots
   
+  // Sorting functionality
+  const handleSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc'
+    
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc'
+    }
+    
+    setSortConfig({ key, direction })
+  }
+  
+  const getSortedSlots = () => {
+    if (!sortConfig) return filteredSlots
+    
+    const sorted = [...filteredSlots].sort((a, b) => {
+      let aValue: any = 0
+      let bValue: any = 0
+      
+      // Calculate sorting values based on the key
+      switch (sortConfig.key) {
+        case 'timeSlot':
+          aValue = a.timeSlot
+          bValue = b.timeSlot
+          break
+        case 'slotNo':
+          aValue = a.slotNo
+          bValue = b.slotNo
+          break
+        case 'overInjection':
+          // Calculate over injection for sorting
+          if (predictionData[a.slotNo] !== undefined && consumptionData[a.slotNo] !== undefined) {
+            const totalInjectionA = predictionData[a.slotNo] * 0.9681
+            const actualConsumptionA = consumptionData[a.slotNo]
+            aValue = Math.max(0, totalInjectionA - actualConsumptionA)
+          }
+          if (predictionData[b.slotNo] !== undefined && consumptionData[b.slotNo] !== undefined) {
+            const totalInjectionB = predictionData[b.slotNo] * 0.9681
+            const actualConsumptionB = consumptionData[b.slotNo]
+            bValue = Math.max(0, totalInjectionB - actualConsumptionB)
+          }
+          break
+        case 'mseb':
+          // Calculate MSEB for sorting
+          if (predictionData[a.slotNo] !== undefined && consumptionData[a.slotNo] !== undefined) {
+            const totalInjectionA = predictionData[a.slotNo] * 0.9681
+            const actualConsumptionA = consumptionData[a.slotNo]
+            aValue = Math.max(0, actualConsumptionA - totalInjectionA)
+          }
+          if (predictionData[b.slotNo] !== undefined && consumptionData[b.slotNo] !== undefined) {
+            const totalInjectionB = predictionData[b.slotNo] * 0.9681
+            const actualConsumptionB = consumptionData[b.slotNo]
+            bValue = Math.max(0, actualConsumptionB - totalInjectionB)
+          }
+          break
+      }
+      
+      if (sortConfig.direction === 'asc') {
+        return aValue < bValue ? -1 : aValue > bValue ? 1 : 0
+      } else {
+        return aValue > bValue ? -1 : aValue < bValue ? 1 : 0
+      }
+    })
+    
+    return sorted
+  }
+  
+  const finalSlots = getSortedSlots()
+  
+  // Calculate totals for the filtered slots
+  const calculateTotals = () => {
+    let totalActualConsumption = 0
+    let totalOverInjection = 0
+    let totalMSEB = 0
+    let validDataCount = 0
+    
+    finalSlots.forEach((slot) => {
+      if (!isLoading && predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined) {
+        const actualConsumption = consumptionData[slot.slotNo]
+        const totalInjection = predictionData[slot.slotNo] * 0.9681
+        const overInjection = Math.max(0, totalInjection - actualConsumption)
+        const mseb = Math.max(0, actualConsumption - totalInjection)
+        
+        totalActualConsumption += actualConsumption
+        totalOverInjection += overInjection
+        totalMSEB += mseb
+        validDataCount++
+      }
+    })
+    
+    return {
+      actualConsumption: validDataCount > 0 ? totalActualConsumption : 0,
+      overInjection: validDataCount > 0 ? totalOverInjection : 0,
+      mseb: validDataCount > 0 ? totalMSEB : 0,
+      hasValidData: validDataCount > 0
+    }
+  }
+  
+  const totals = calculateTotals()
 
 
   // Close calendar when clicking outside
@@ -549,33 +685,16 @@ export default function TrendAnalysis() {
 
           {/* Table Container */}
           <div className="flex-1 p-6 overflow-hidden">
-            <style jsx>{`
-              .custom-scrollbar::-webkit-scrollbar {
-                width: 6px;
-                height: 6px;
-              }
-              .custom-scrollbar::-webkit-scrollbar-track {
-                background: #f1f1f1;
-                border-radius: 3px;
-              }
-              .custom-scrollbar::-webkit-scrollbar-thumb {
-                background: #c1c1c1;
-                border-radius: 3px;
-              }
-              .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-                background: #a8a8a8;
-              }
-            `}</style>
-            <div className="relative overflow-auto h-full rounded-lg border border-gray-200 custom-scrollbar">
-              <table className="w-full border-collapse">
+            <div className="relative overflow-y-auto h-full rounded-lg border border-gray-200">
+              <table className="w-full border-collapse text-xs">
                 <thead className="sticky top-0 z-50" style={{ backgroundColor: "#F4F5F6" }}>
                   <tr>
                     <th
-                      className="sticky left-0 z-[58] px-4 py-3 text-left font-semibold text-sm whitespace-nowrap border-b border-r border-gray-200"
+                      className="px-2 py-2 text-left font-semibold text-xs border-b border-r border-gray-200 w-20"
                       style={{ backgroundColor: "#F4F5F6", color: "#333333" }}
                     >
                       <select
-                        className="text-sm rounded-md px-2 py-1 text-gray-700 font-medium"
+                        className="text-xs rounded-md px-1 py-1 text-gray-700 font-bold w-full"
                         style={{ backgroundColor: "#F4F5F6" }}
                         onChange={(e) => {
                           const value = e.target.value
@@ -596,64 +715,138 @@ export default function TrendAnalysis() {
                       </select>
                     </th>
                     <th
-                      className="sticky left-[120px] z-[59] px-4 py-3 text-left font-semibold text-sm whitespace-nowrap border-b border-r border-gray-200"
+                      className="px-2 py-2 text-left font-semibold text-xs border-b border-r border-gray-200 w-24"
                       style={{ backgroundColor: "#F4F5F6", color: "#333333" }}
                     >
-                      Time Slot
+                      <button
+                        onClick={() => handleSort('timeSlot')}
+                        className="flex flex-col items-center gap-1 hover:bg-gray-100 p-1 rounded transition-colors text-xs w-full"
+                      >
+                        <div className="text-center leading-tight">
+                          <div>Time Slot</div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Filter className="h-3 w-3" />
+                          {sortConfig?.key === 'timeSlot' && (
+                            sortConfig.direction === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+                          )}
+                        </div>
+                      </button>
                     </th>
                     <th
-                      className="sticky left-[220px] z-[60] px-4 py-3 text-left font-semibold text-sm whitespace-nowrap border-b border-r border-gray-200"
+                      className="px-2 py-2 text-left font-semibold text-xs border-b border-r border-gray-200 w-16"
                       style={{ backgroundColor: "#F4F5F6", color: "#333333" }}
                     >
-                      Slot No.
+                      <button
+                        onClick={() => handleSort('slotNo')}
+                        className="flex flex-col items-center gap-1 hover:bg-gray-100 p-1 rounded transition-colors text-xs w-full"
+                      >
+                        <div className="text-center leading-tight">
+                          <div>Slot No.</div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Filter className="h-3 w-3" />
+                          {sortConfig?.key === 'slotNo' && (
+                            sortConfig.direction === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+                          )}
+                        </div>
+                      </button>
                     </th>
                     <th
-                      className="px-4 py-3 text-left font-semibold text-sm whitespace-nowrap border-b border-r border-gray-200"
+                      className="px-1 py-2 text-left font-semibold text-xs border-b border-r border-gray-200 w-20"
                       style={{ backgroundColor: "#F4F5F6", color: "#333333" }}
                     >
-                      Final Prediction (kWh)
+                      <div className="text-center leading-tight">
+                        <div>Final Prediction</div>
+                        <div>(kWh)</div>
+                      </div>
                     </th>
                     <th
-                      className="px-4 py-3 text-left font-semibold text-sm whitespace-nowrap border-b border-r border-gray-200"
+                      className="px-1 py-2 text-left font-semibold text-xs border-b border-r border-gray-200 w-20"
                       style={{ backgroundColor: "#F4F5F6", color: "#333333" }}
                     >
-                      Total Injection (After 3.18% loss) (kWh)
+                      <div className="text-center leading-tight">
+                        <div>Total Injection</div>
+                        <div>(After 3.18% loss)</div>
+                        <div>(kWh)</div>
+                      </div>
                     </th>
                     <th
-                      className="px-4 py-3 text-left font-semibold text-sm whitespace-nowrap border-b border-r border-gray-200"
+                      className="px-1 py-2 text-left font-semibold text-xs border-b border-r border-gray-200 w-20"
                       style={{ backgroundColor: "#F4F5F6", color: "#333333" }}
                     >
-                      Actual Consumption (kWh)
+                      <div className="text-center leading-tight">
+                        <div>Actual Consumption</div>
+                        <div>(kWh)</div>
+                      </div>
                     </th>
                     <th
-                      className="px-4 py-3 text-left font-semibold text-sm whitespace-nowrap border-b border-r border-gray-200"
+                      className="px-1 py-2 text-left font-semibold text-xs border-b border-r border-gray-200 w-20"
                       style={{ backgroundColor: "#F4F5F6", color: "#333333" }}
                     >
-                      Final Prediction (MW)
+                      <div className="text-center leading-tight">
+                        <div>Final Prediction</div>
+                        <div>(MW)</div>
+                      </div>
                     </th>
                     <th
-                      className="px-4 py-3 text-left font-semibold text-sm whitespace-nowrap border-b border-r border-gray-200"
+                      className="px-1 py-2 text-left font-semibold text-xs border-b border-r border-gray-200 w-20"
                       style={{ backgroundColor: "#F4F5F6", color: "#333333" }}
                     >
-                      Actual Consumption (MW)
+                      <div className="text-center leading-tight">
+                        <div>Actual Consumption</div>
+                        <div>(MW)</div>
+                      </div>
                     </th>
                     <th
-                      className="px-4 py-3 text-left font-semibold text-sm whitespace-nowrap border-b border-r border-gray-200"
+                      className="px-1 py-2 text-left font-semibold text-xs border-b border-r border-gray-200 w-20"
                       style={{ backgroundColor: "#F4F5F6", color: "#333333" }}
                     >
-                      Capped Actual Consumption (kWh)
+                      <div className="text-center leading-tight">
+                        <div>Capped Actual</div>
+                        <div>Consumption</div>
+                        <div>(kWh)</div>
+                      </div>
                     </th>
                     <th
-                      className="px-4 py-3 text-left font-semibold text-sm whitespace-nowrap border-b border-r border-gray-200"
+                      className="px-1 py-2 text-left font-semibold text-xs border-b border-r border-gray-200 w-24"
                       style={{ backgroundColor: "#F4F5F6", color: "#333333" }}
                     >
-                      Over Injection (kWh)
+                      <button
+                        onClick={() => handleSort('overInjection')}
+                        className="flex flex-col items-center gap-1 hover:bg-gray-100 p-1 rounded transition-colors text-xs w-full"
+                      >
+                        <div className="text-center leading-tight">
+                          <div>Over Injection</div>
+                          <div>(kWh)</div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Filter className="h-3 w-3" />
+                          {sortConfig?.key === 'overInjection' && (
+                            sortConfig.direction === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+                          )}
+                        </div>
+                      </button>
                     </th>
                     <th
-                      className="px-4 py-3 text-left font-semibold text-sm whitespace-nowrap border-b border-gray-200"
+                      className="px-1 py-2 text-left font-semibold text-xs border-b border-gray-200 w-20"
                       style={{ backgroundColor: "#F4F5F6", color: "#333333" }}
                     >
-                      MSEB(kWh)
+                      <button
+                        onClick={() => handleSort('mseb')}
+                        className="flex flex-col items-center gap-1 hover:bg-gray-100 p-1 rounded transition-colors text-xs w-full"
+                      >
+                        <div className="text-center leading-tight">
+                          <div>MSEB</div>
+                          <div>(kWh)</div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Filter className="h-3 w-3" />
+                          {sortConfig?.key === 'mseb' && (
+                            sortConfig.direction === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+                          )}
+                        </div>
+                      </button>
                     </th>
                   </tr>
                 </thead>
@@ -672,10 +865,9 @@ export default function TrendAnalysis() {
                       overInjectionValue = overInjection.toFixed(1);
                       msebValue = mseb;
                     } else {
-                      // Generate random choice for fallback when data not available
-                      const hasOverInjection = Math.random() > 0.5;
-                      overInjectionValue = hasOverInjection ? (Math.random() * 1500).toFixed(1) : "0.0";
-                      msebValue = hasOverInjection ? 0 : Math.floor(Math.random() * 1000);
+                      // Use N/A values when data not available
+                      overInjectionValue = "N/A";
+                      msebValue = 0;
                     }
 
                     // Check if we should highlight over injection (only for real calculated values > 0)
@@ -693,27 +885,27 @@ export default function TrendAnalysis() {
                     return (
                       <tr key={slot.slotNo} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                         <td
-                          className="sticky left-0 z-[38] px-4 py-3 border-b border-r border-gray-200 bg-inherit font-normal"
+                          className="px-2 py-2 border-b border-r border-gray-200 font-normal text-xs"
                           style={{ color: "#333333" }}
                         >
-                          <span className={cn("rounded-full px-2 py-1 text-xs font-medium", getZoneColor(slot.zone))}>
+                          <span className={cn("rounded-full px-1 py-0.5 text-xs font-medium", getZoneColor(slot.zone))}>
                             {slot.zone}
                           </span>
                         </td>
                         <td
-                          className="sticky left-[120px] z-[39] px-4 py-3 font-mono text-sm border-b border-r border-gray-200 bg-inherit whitespace-nowrap font-normal"
+                          className="px-2 py-2 font-mono text-xs border-b border-r border-gray-200 font-normal text-center"
                           style={{ color: "#333333" }}
                         >
                           {slot.timeSlot}
                         </td>
                         <td
-                          className="sticky left-[220px] z-[40] px-4 py-3 text-sm border-b border-r border-gray-200 bg-inherit whitespace-nowrap font-normal"
+                          className="px-2 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
                           style={{ color: "#333333" }}
                         >
                           Slot {slot.slotNo.toString().padStart(2, "0")}
                         </td>
                         <td
-                          className="px-4 py-3 text-sm border-b border-r border-gray-200 whitespace-nowrap font-normal"
+                          className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
                           style={{ color: "#333333" }}
                         >
                           {isLoading ? 
@@ -725,7 +917,7 @@ export default function TrendAnalysis() {
                           }
                         </td>
                         <td
-                          className="px-4 py-3 text-sm border-b border-r border-gray-200 whitespace-nowrap font-normal"
+                          className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
                           style={{ color: "#333333" }}
                         >
                           {isLoading ? 
@@ -737,7 +929,7 @@ export default function TrendAnalysis() {
                           }
                         </td>
                         <td
-                          className="px-4 py-3 text-sm border-b border-r border-gray-200 whitespace-nowrap font-normal"
+                          className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
                           style={{ color: "#333333" }}
                         >
                           {isLoading ? 
@@ -749,7 +941,7 @@ export default function TrendAnalysis() {
                           }
                         </td>
                         <td
-                          className="px-4 py-3 text-sm border-b border-r border-gray-200 whitespace-nowrap font-normal"
+                          className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
                           style={{ color: "#333333" }}
                         >
                           {isLoading ? 
@@ -761,7 +953,7 @@ export default function TrendAnalysis() {
                           }
                         </td>
                         <td
-                          className="px-4 py-3 text-sm border-b border-r border-gray-200 whitespace-nowrap font-normal"
+                          className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
                           style={{ color: "#333333" }}
                         >
                           {isLoading ? 
@@ -773,7 +965,7 @@ export default function TrendAnalysis() {
                           }
                         </td>
                         <td
-                          className="px-4 py-3 text-sm border-b border-r border-gray-200 whitespace-nowrap font-normal"
+                          className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
                           style={{ color: "#333333" }}
                         >
                           {isLoading ? 
@@ -785,7 +977,7 @@ export default function TrendAnalysis() {
                           }
                         </td>
                         <td
-                          className="px-4 py-3 text-sm border-b border-r border-gray-200 whitespace-nowrap font-normal"
+                          className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
                           style={{
                             color: shouldHighlightOverInjection ? "#D92D20" : "#333333",
                             backgroundColor: shouldHighlightOverInjection ? "#FFE4DC" : "transparent",
@@ -800,7 +992,7 @@ export default function TrendAnalysis() {
                           }
                         </td>
                         <td
-                          className="px-4 py-3 text-sm border-b border-gray-200 whitespace-nowrap font-normal"
+                          className="px-1 py-2 text-xs border-b border-gray-200 font-normal text-center"
                           style={{
                             color: shouldHighlightMSEB ? "#D92D20" : "#333333",
                             backgroundColor: shouldHighlightMSEB ? "#FFE4DC" : "transparent",
@@ -818,6 +1010,29 @@ export default function TrendAnalysis() {
                     )
                   })}
                 </tbody>
+                <tfoot className="sticky bottom-0 z-40" style={{ backgroundColor: "#F8F9FA" }}>
+                  <tr className="border-t-2 border-gray-300">
+                    <td className="px-2 py-3 text-xs font-bold text-center border-r border-gray-200" style={{ color: "#333333" }}>
+                      TOTAL
+                    </td>
+                    <td className="px-2 py-3 text-xs border-r border-gray-200"></td>
+                    <td className="px-2 py-3 text-xs border-r border-gray-200"></td>
+                    <td className="px-1 py-3 text-xs border-r border-gray-200"></td>
+                    <td className="px-1 py-3 text-xs border-r border-gray-200"></td>
+                    <td className="px-1 py-3 text-xs font-bold text-center border-r border-gray-200" style={{ color: "#333333" }}>
+                      {isLoading ? "Loading..." : totals.hasValidData ? totals.actualConsumption.toFixed(2) : "N/A"}
+                    </td>
+                    <td className="px-1 py-3 text-xs border-r border-gray-200"></td>
+                    <td className="px-1 py-3 text-xs border-r border-gray-200"></td>
+                    <td className="px-1 py-3 text-xs border-r border-gray-200"></td>
+                    <td className="px-1 py-3 text-xs font-bold text-center border-r border-gray-200" style={{ color: "#333333" }}>
+                      {isLoading ? "Loading..." : totals.hasValidData ? totals.overInjection.toFixed(1) : "N/A"}
+                    </td>
+                    <td className="px-1 py-3 text-xs font-bold text-center" style={{ color: "#333333" }}>
+                      {isLoading ? "Loading..." : totals.hasValidData ? totals.mseb.toFixed(1) : "N/A"}
+                    </td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </div>
@@ -825,6 +1040,11 @@ export default function TrendAnalysis() {
           {/* Summary */}
           <div className="px-6 py-4 border-t border-gray-200 text-sm text-gray-600">
             Showing {finalSlots.length} of {timeSlots.length} time slots for {formatDate(selectedDate, "dd MMM yyyy")}
+            {selectedZones.length < 4 && (
+              <span className="ml-2 text-blue-600 font-medium">
+                (Filtered by: {selectedZones.join(", ")})
+              </span>
+            )}
           </div>
         </div>
       </div>
