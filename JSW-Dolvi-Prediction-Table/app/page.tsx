@@ -78,6 +78,7 @@ function CustomCalendar({
 
   const isFutureDate = (day: number) => {
     const dateToCheck = new Date(year, month, day)
+    // Use client's local timezone for today's date
     const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate())
     return dateToCheck > todayDateOnly
   }
@@ -238,12 +239,12 @@ function exportToExcel(data: any[], selectedDate: Date, predictionData: Record<n
     Zone: slot.zone,
     "Time Slot": slot.timeSlot,
     "Slot No.": `Slot ${slot.slotNo.toString().padStart(2, "0")}`,
-    "Final Prediction (kWh)": predictionData[slot.slotNo] !== undefined ? predictionData[slot.slotNo].toFixed(1) : "",
-    "Total Injection Units (After loss-5.18%)": predictionData[slot.slotNo] !== undefined ? (predictionData[slot.slotNo] * 0.9681).toFixed(2) : "",
-    "Actual Consumption (kWh)": consumptionData[slot.slotNo] !== undefined ? consumptionData[slot.slotNo].toFixed(2) : "",
-    "Final Prediction (MW)": predictionData[slot.slotNo] !== undefined ? (predictionData[slot.slotNo] / 250).toFixed(2) : "",
-    "Actual Consumption (MW)": consumptionData[slot.slotNo] !== undefined ? (consumptionData[slot.slotNo] / 250).toFixed(2) : "",
-    "Capped Actual Consumption (kWh)": consumptionData[slot.slotNo] !== undefined ? Math.min(4643, consumptionData[slot.slotNo]).toFixed(1) : "",
+    "Final Prediction (kWh)": predictionData[slot.slotNo] !== undefined ? predictionData[slot.slotNo].toFixed(1) : "-",
+    "Total Injection Units (After loss-5.18%)": predictionData[slot.slotNo] !== undefined ? (predictionData[slot.slotNo] * 0.9681).toFixed(2) : "-",
+    "Actual Consumption (kWh)": consumptionData[slot.slotNo] !== undefined ? consumptionData[slot.slotNo].toFixed(2) : "-",
+    "Final Prediction (MW)": predictionData[slot.slotNo] !== undefined ? (predictionData[slot.slotNo] / 250).toFixed(2) : "-",
+    "Actual Consumption (MW)": consumptionData[slot.slotNo] !== undefined ? (consumptionData[slot.slotNo] / 250).toFixed(2) : "-",
+    "Capped Actual Consumption (kWh)": consumptionData[slot.slotNo] !== undefined ? Math.min(4643, consumptionData[slot.slotNo]).toFixed(1) : "-",
     "Over Injection (kWh)": (() => {
       if (predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined) {
         const totalInjection = predictionData[slot.slotNo] * 0.9681;
@@ -251,7 +252,7 @@ function exportToExcel(data: any[], selectedDate: Date, predictionData: Record<n
         const overInjection = Math.max(0, totalInjection - actualConsumption);
         return overInjection.toFixed(1);
       }
-      return "";
+      return "-";
     })(),
     "MSEB (₹)": (() => {
       if (predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined) {
@@ -260,7 +261,7 @@ function exportToExcel(data: any[], selectedDate: Date, predictionData: Record<n
         const mseb = Math.max(0, actualConsumption - totalInjection);
         return mseb.toFixed(1);
       }
-      return "";
+      return "-";
     })(),
   }))
 
@@ -287,16 +288,16 @@ function exportToExcel(data: any[], selectedDate: Date, predictionData: Record<n
   // Add totals row
   const totalsRow = {
     Zone: "TOTAL",
-    "Time Slot": "",
-    "Slot No.": "",
-    "Final Prediction (kWh)": "",
-    "Total Injection Units (After loss-5.18%)": "",
-    "Actual Consumption (kWh)": validDataCount > 0 ? totalActualConsumption.toFixed(2) : "",
-    "Final Prediction (MW)": "",
-    "Actual Consumption (MW)": "",
-    "Capped Actual Consumption (kWh)": "",
-    "Over Injection (kWh)": validDataCount > 0 ? totalOverInjection.toFixed(1) : "",
-    "MSEB (₹)": validDataCount > 0 ? totalMSEB.toFixed(1) : "",
+    "Time Slot": "-",
+    "Slot No.": "-",
+    "Final Prediction (kWh)": "-",
+    "Total Injection Units (After loss-5.18%)": "-",
+    "Actual Consumption (kWh)": validDataCount > 0 ? totalActualConsumption.toFixed(2) : "-",
+    "Final Prediction (MW)": "-",
+    "Actual Consumption (MW)": "-",
+    "Capped Actual Consumption (kWh)": "-",
+    "Over Injection (kWh)": validDataCount > 0 ? totalOverInjection.toFixed(1) : "-",
+    "MSEB (₹)": validDataCount > 0 ? totalMSEB.toFixed(1) : "-",
   }
 
   // Add the totals row to the data
@@ -326,7 +327,7 @@ function exportToExcel(data: any[], selectedDate: Date, predictionData: Record<n
 
 export default function TrendAnalysis() {
   const [selectedDate, setSelectedDate] = useState<Date>(() => {
-    const today = new Date()
+    const today = new Date() // Uses client's local timezone
     today.setHours(0, 0, 0, 0) // Reset time to midnight for consistent date comparison
     return today
   })
@@ -339,9 +340,9 @@ export default function TrendAnalysis() {
   const datePickerRef = useRef<HTMLDivElement>(null)
   const currentTimeSlotRef = useRef<HTMLTableRowElement>(null)
 
-  // Function to get current time slot number (1-96)
+  // Function to get current time slot number (1-96) using client's local timezone
   const getCurrentTimeSlot = () => {
-    const now = new Date()
+    const now = new Date() // Uses client's local timezone automatically
     const hours = now.getHours()
     const minutes = now.getMinutes()
     
@@ -351,6 +352,12 @@ export default function TrendAnalysis() {
     
     // Ensure it's within valid range (1-96)
     return Math.min(Math.max(slotNumber, 1), 96)
+  }
+
+  // Check if selected date is today (using client's local timezone)
+  const isSelectedDateToday = () => {
+    const today = new Date() // Client's local time
+    return selectedDate.toDateString() === today.toDateString()
   }
 
   // Function to convert date to IST and get start/end times for API query
@@ -540,9 +547,10 @@ export default function TrendAnalysis() {
     fetchConsumptionData(selectedDate);
   }, [selectedDate]);
 
-  // Generate time slots and get current slot
+  // Generate time slots and get current slot (ONLY if viewing today's date in client timezone)
   const timeSlots = generateTimeSlots()
-  const currentTimeSlot = getCurrentTimeSlot()
+  // currentTimeSlot will be null for any date that is NOT today - this disables both highlighting and auto-scroll
+  const currentTimeSlot = isSelectedDateToday() ? getCurrentTimeSlot() : null
   const filteredSlots = timeSlots.filter((slot) => selectedZones.includes(slot.zone))
 
   // Sorting functionality
@@ -647,9 +655,9 @@ export default function TrendAnalysis() {
   
   const totals = calculateTotals()
 
-  // Scroll to align current time slot with header column line
+  // Auto-scroll ONLY works when viewing today's date in client timezone
   useEffect(() => {
-    if (currentTimeSlotRef.current) {
+    if (currentTimeSlotRef.current && isSelectedDateToday()) {
       setTimeout(() => {
         const tableContainer = currentTimeSlotRef.current?.closest('.overflow-y-auto')
         const currentRow = currentTimeSlotRef.current
@@ -935,8 +943,8 @@ export default function TrendAnalysis() {
                       overInjectionValue = overInjection.toFixed(1);
                       msebValue = mseb;
                     } else {
-                      // Use blank values when data not available
-                      overInjectionValue = "";
+                      // Use dash values when data not available
+                      overInjectionValue = "-";
                       msebValue = 0;
                     }
 
@@ -952,146 +960,149 @@ export default function TrendAnalysis() {
                       consumptionData[slot.slotNo] !== undefined && 
                       msebValue > 0;
 
-                    // Check if this is the current time slot
-                    const isCurrentTimeSlot = slot.slotNo === currentTimeSlot
+                    // Check if this is the current time slot (only highlight if viewing today)
+                    const isCurrentTimeSlot = currentTimeSlot !== null && slot.slotNo === currentTimeSlot
+                    
+                    // Green highlighting ONLY works when viewing today's date (currentTimeSlot !== null)
+                    // Highlights current slot + next 3 slots in Final Prediction (MW) column
+                    // BUT only if the slot has actual data (not "-")
+                    const shouldHighlightFinalPredictionMW = currentTimeSlot !== null && 
+                      slot.slotNo >= currentTimeSlot && 
+                      slot.slotNo <= currentTimeSlot + 3 &&
+                      predictionData[slot.slotNo] !== undefined
                     
                     return (
                       <tr 
                         key={slot.slotNo}
                         ref={isCurrentTimeSlot ? currentTimeSlotRef : null}
-                        className={
-                          isCurrentTimeSlot 
-                            ? "border-2" 
-                            : (index % 2 === 0 ? "bg-white" : "bg-gray-50")
-                        }
-                        style={{
-                          backgroundColor: isCurrentTimeSlot ? "#00A251" : undefined,
-                          borderColor: isCurrentTimeSlot ? "#00A251" : undefined,
-                          color: isCurrentTimeSlot ? "white" : undefined
-                        }}
+                        className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}
                       >
                         <td
                           className="px-2 py-2 border-b border-r border-gray-200 font-normal text-xs"
-                          style={{ color: isCurrentTimeSlot ? "white" : "#333333" }}
+                          style={{ color: "#333333" }}
                         >
                           <span className={cn(
                             "rounded-full px-1 py-0.5 text-xs font-medium", 
-                            isCurrentTimeSlot ? "bg-white text-green-800" : getZoneColor(slot.zone)
+                            getZoneColor(slot.zone)
                           )}>
                             {slot.zone}
                           </span>
                         </td>
                         <td
                           className="px-2 py-2 font-mono text-xs border-b border-r border-gray-200 font-normal text-center"
-                          style={{ color: isCurrentTimeSlot ? "white" : "#333333" }}
+                          style={{ color: "#333333" }}
                         >
                           {slot.timeSlot}
                         </td>
                         <td
                           className="px-2 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
-                          style={{ color: isCurrentTimeSlot ? "white" : "#333333" }}
+                          style={{ color: "#333333" }}
                         >
                           Slot {slot.slotNo.toString().padStart(2, "0")}
                         </td>
                         <td
                           className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
-                          style={{ color: isCurrentTimeSlot ? "white" : "#333333" }}
+                          style={{ color: "#333333" }}
                         >
                           {isLoading ? 
                             "Loading..." : 
                             (predictionData[slot.slotNo] !== undefined ? 
                               predictionData[slot.slotNo].toFixed(1) : 
-                              ""
+                              "-"
                             )
                           }
                         </td>
                         <td
                           className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
-                          style={{ color: isCurrentTimeSlot ? "white" : "#333333" }}
+                          style={{ color: "#333333" }}
                         >
                           {isLoading ? 
                             "Loading..." : 
                             (predictionData[slot.slotNo] !== undefined ? 
                               (predictionData[slot.slotNo] * 0.9681).toFixed(2) : 
-                              ""
+                              "-"
                             )
                           }
                         </td>
                         <td
                           className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
-                          style={{ color: isCurrentTimeSlot ? "white" : "#333333" }}
+                          style={{ color: "#333333" }}
                         >
                           {isLoading ? 
                             "Loading..." : 
                             (consumptionData[slot.slotNo] !== undefined ? 
                               consumptionData[slot.slotNo].toFixed(2) : 
-                              ""
+                              "-"
                             )
                           }
                         </td>
                         <td
                           className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
-                          style={{ color: isCurrentTimeSlot ? "white" : "#333333" }}
+                          style={{ 
+                            backgroundColor: shouldHighlightFinalPredictionMW ? "#52C788" : "transparent",
+                            color: shouldHighlightFinalPredictionMW ? "white" : "#333333",
+                            borderColor: shouldHighlightFinalPredictionMW ? "#52C788" : undefined
+                          }}
                         >
                           {isLoading ? 
                             "Loading..." : 
                             (predictionData[slot.slotNo] !== undefined ? 
                               (predictionData[slot.slotNo] / 250).toFixed(2) : 
-                              ""
+                              "-"
                             )
                           }
                         </td>
                         <td
                           className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
-                          style={{ color: isCurrentTimeSlot ? "white" : "#333333" }}
+                          style={{ color: "#333333" }}
                         >
                           {isLoading ? 
                             "Loading..." : 
                             (consumptionData[slot.slotNo] !== undefined ? 
                               (consumptionData[slot.slotNo] / 250).toFixed(2) : 
-                              ""
+                              "-"
                             )
                           }
                         </td>
                         <td
                           className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
-                          style={{ color: isCurrentTimeSlot ? "white" : "#333333" }}
+                          style={{ color: "#333333" }}
                         >
                           {isLoading ? 
                             "Loading..." : 
                             (consumptionData[slot.slotNo] !== undefined ? 
                               Math.min(4643, consumptionData[slot.slotNo]).toFixed(1) : 
-                              ""
+                              "-"
                             )
                           }
                         </td>
                         <td
                           className="px-1 py-2 text-xs border-b border-r border-gray-200 font-normal text-center"
                           style={{
-                            color: isCurrentTimeSlot ? "white" : (shouldHighlightOverInjection ? "#D92D20" : "#333333"),
-                            backgroundColor: isCurrentTimeSlot ? "transparent" : (shouldHighlightOverInjection ? "#FFE4DC" : "transparent"),
+                            color: shouldHighlightOverInjection ? "#D92D20" : "#333333",
+                            backgroundColor: shouldHighlightOverInjection ? "#FFE4DC" : "transparent",
                           }}
                         >
                           {isLoading ? 
                             "Loading..." : 
                             (predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined ? 
                               overInjectionValue : 
-                              ""
+                              "-"
                             )
                           }
                         </td>
                         <td
                           className="px-1 py-2 text-xs border-b border-gray-200 font-normal text-center"
                           style={{
-                            color: isCurrentTimeSlot ? "white" : (shouldHighlightMSEB ? "#D92D20" : "#333333"),
-                            backgroundColor: isCurrentTimeSlot ? "transparent" : (shouldHighlightMSEB ? "#FFE4DC" : "transparent"),
+                            color: shouldHighlightMSEB ? "#D92D20" : "#333333",
+                            backgroundColor: shouldHighlightMSEB ? "#FFE4DC" : "transparent",
                           }}
                         >
                           {isLoading ? 
                             "Loading..." : 
                             (predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined ? 
                               msebValue.toFixed(1) : 
-                              ""
+                              "-"
                             )
                           }
                         </td>
@@ -1104,21 +1115,21 @@ export default function TrendAnalysis() {
                     <td className="px-2 py-3 text-xs font-bold text-center border-r border-gray-200" style={{ color: "#333333" }}>
                       TOTAL
                     </td>
-                    <td className="px-2 py-3 text-xs border-r border-gray-200"></td>
-                    <td className="px-2 py-3 text-xs border-r border-gray-200"></td>
-                    <td className="px-1 py-3 text-xs border-r border-gray-200"></td>
-                    <td className="px-1 py-3 text-xs border-r border-gray-200"></td>
+                    <td className="px-2 py-3 text-xs border-r border-gray-200">-</td>
+                    <td className="px-2 py-3 text-xs border-r border-gray-200">-</td>
+                    <td className="px-1 py-3 text-xs border-r border-gray-200">-</td>
+                    <td className="px-1 py-3 text-xs border-r border-gray-200">-</td>
                     <td className="px-1 py-3 text-xs font-bold text-center border-r border-gray-200" style={{ color: "#333333" }}>
-                      {isLoading ? "Loading..." : totals.hasValidData ? totals.actualConsumption.toFixed(2) : ""}
+                      {isLoading ? "Loading..." : totals.hasValidData ? totals.actualConsumption.toFixed(2) : "-"}
                     </td>
-                    <td className="px-1 py-3 text-xs border-r border-gray-200"></td>
-                    <td className="px-1 py-3 text-xs border-r border-gray-200"></td>
-                    <td className="px-1 py-3 text-xs border-r border-gray-200"></td>
+                    <td className="px-1 py-3 text-xs border-r border-gray-200">-</td>
+                    <td className="px-1 py-3 text-xs border-r border-gray-200">-</td>
+                    <td className="px-1 py-3 text-xs border-r border-gray-200">-</td>
                     <td className="px-1 py-3 text-xs font-bold text-center border-r border-gray-200" style={{ color: "#333333" }}>
-                      {isLoading ? "Loading..." : totals.hasValidData ? totals.overInjection.toFixed(1) : ""}
+                      {isLoading ? "Loading..." : totals.hasValidData ? totals.overInjection.toFixed(1) : "-"}
                     </td>
                     <td className="px-1 py-3 text-xs font-bold text-center" style={{ color: "#333333" }}>
-                      {isLoading ? "Loading..." : totals.hasValidData ? totals.mseb.toFixed(1) : ""}
+                      {isLoading ? "Loading..." : totals.hasValidData ? totals.mseb.toFixed(1) : "-"}
                     </td>
                   </tr>
                 </tfoot>
