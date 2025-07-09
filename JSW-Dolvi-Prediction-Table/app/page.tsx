@@ -549,7 +549,7 @@ export default function TrendAnalysis() {
     fetchConsumptionData(selectedDate);
   }, [selectedDate]);
 
-  // Auto-refresh data every 30 seconds (only when viewing today's date)
+  // Auto-refresh data every 5 minutes (only when viewing today's date)
   useEffect(() => {
     if (!isSelectedDateToday()) {
       return; // Don't auto-refresh for historical dates
@@ -560,7 +560,7 @@ export default function TrendAnalysis() {
       setLastRefreshTime(new Date());
       fetchPredictionData(selectedDate);
       fetchConsumptionData(selectedDate);
-    }, 30000); // 30 seconds
+    }, 300000); // 5 minutes
 
     // Cleanup interval on unmount or when date changes
     return () => {
@@ -1171,7 +1171,7 @@ export default function TrendAnalysis() {
               </div>
               {isSelectedDateToday() && (
                 <div className="text-xs text-gray-500">
-                  Auto-refresh: Last updated {lastRefreshTime.toLocaleTimeString()}
+                  Auto-refresh: Last updated {lastRefreshTime.getHours().toString().padStart(2, '0')}:{lastRefreshTime.getMinutes().toString().padStart(2, '0')}:{lastRefreshTime.getSeconds().toString().padStart(2, '0')}
                 </div>
               )}
             </div>
