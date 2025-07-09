@@ -337,6 +337,7 @@ export default function TrendAnalysis() {
   const [consumptionData, setConsumptionData] = useState<Record<number, number>>({})
   const [isLoading, setIsLoading] = useState(false)
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null)
+  const [lastRefreshTime, setLastRefreshTime] = useState<Date>(new Date())
   const datePickerRef = useRef<HTMLDivElement>(null)
   const currentTimeSlotRef = useRef<HTMLTableRowElement>(null)
 
@@ -543,9 +544,29 @@ export default function TrendAnalysis() {
 
   // Fetch data when selected date changes
   useEffect(() => {
+    setLastRefreshTime(new Date());
     fetchPredictionData(selectedDate);
     fetchConsumptionData(selectedDate);
   }, [selectedDate]);
+
+  // Auto-refresh data every 30 seconds (only when viewing today's date)
+  useEffect(() => {
+    if (!isSelectedDateToday()) {
+      return; // Don't auto-refresh for historical dates
+    }
+
+    const refreshInterval = setInterval(() => {
+      console.log('Auto-refreshing data...');
+      setLastRefreshTime(new Date());
+      fetchPredictionData(selectedDate);
+      fetchConsumptionData(selectedDate);
+    }, 30000); // 30 seconds
+
+    // Cleanup interval on unmount or when date changes
+    return () => {
+      clearInterval(refreshInterval);
+    };
+  }, [selectedDate]); // Re-setup interval when date changes
 
   // Generate time slots and get current slot (ONLY if viewing today's date in client timezone)
   const timeSlots = generateTimeSlots()
@@ -1139,12 +1160,21 @@ export default function TrendAnalysis() {
 
           {/* Summary */}
           <div className="px-6 py-4 border-t border-gray-200 text-sm text-gray-600">
-            Showing {finalSlots.length} of {timeSlots.length} time slots for {formatDate(selectedDate, "dd MMM yyyy")}
-            {selectedZones.length < 4 && (
-              <span className="ml-2 text-blue-600 font-medium">
-                (Filtered by: {selectedZones.join(", ")})
-              </span>
-            )}
+            <div className="flex justify-between items-center">
+              <div>
+                Showing {finalSlots.length} of {timeSlots.length} time slots for {formatDate(selectedDate, "dd MMM yyyy")}
+                {selectedZones.length < 4 && (
+                  <span className="ml-2 text-blue-600 font-medium">
+                    (Filtered by: {selectedZones.join(", ")})
+                  </span>
+                )}
+              </div>
+              {isSelectedDateToday() && (
+                <div className="text-xs text-gray-500">
+                  Auto-refresh: Last updated {lastRefreshTime.toLocaleTimeString()}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
