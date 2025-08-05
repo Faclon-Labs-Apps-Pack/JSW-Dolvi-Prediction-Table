@@ -325,6 +325,19 @@ function exportToExcel(data: any[], selectedDate: Date, predictionData: Record<n
   URL.revokeObjectURL(url)
 }
 
+// Cache interface for storing API responses
+interface CacheEntry {
+  data: Record<number, number>
+  timestamp: number
+  slotNumbers: number[]
+}
+
+// Global cache for prediction and consumption data
+const dataCache = {
+  prediction: new Map<string, CacheEntry>(),
+  consumption: new Map<string, CacheEntry>(),
+}
+
 export default function TrendAnalysis() {
   const [selectedDate, setSelectedDate] = useState<Date>(() => {
     const today = new Date() // Uses client's local timezone
@@ -340,6 +353,32 @@ export default function TrendAnalysis() {
   const [lastRefreshTime, setLastRefreshTime] = useState<Date>(new Date())
   const datePickerRef = useRef<HTMLDivElement>(null)
   const currentTimeSlotRef = useRef<HTMLTableRowElement>(null)
+
+  // Helper function to generate cache key
+  const getCacheKey = (date: Date) => {
+    return formatDate(date, "yyyy-MM-dd")
+  }
+
+  // Helper function to check if cache entry is still valid
+  const isCacheValid = (entry: CacheEntry, maxAge: number) => {
+    return Date.now() - entry.timestamp < maxAge
+  }
+
+  // Helper function to determine which slots need refreshing
+  const getSlotsToRefresh = (isToday: boolean, currentSlot: number) => {
+    if (!isToday) {
+      // For historical dates, fetch all slots once and cache for longer
+      return Array.from({ length: 96 }, (_, i) => i + 1)
+    }
+    
+    // For today, prioritize current and next few slots
+    const prioritySlots = []
+    for (let i = 0; i < 4; i++) {
+      const slot = currentSlot + i
+      if (slot <= 96) prioritySlots.push(slot)
+    }
+    return prioritySlots
+  }
 
   // Function to get current time slot number (1-96) using client's local timezone
   const getCurrentTimeSlot = () => {
@@ -388,16 +427,53 @@ export default function TrendAnalysis() {
     };
   };
 
-  // Function to fetch consumption data from new API endpoint
-  const fetchConsumptionData = async (date: Date) => {
+  // Function to fetch consumption data from new API endpoint with caching
+  const fetchConsumptionData = async (date: Date, forceRefresh = false) => {
     try {
-      const { startTime: dayStartTime } = getISTTimeRange(date);
-      const consumptionMap: Record<number, number> = {};
+      const cacheKey = getCacheKey(date);
+      const isToday = isSelectedDateToday();
+      const currentSlot = getCurrentTimeSlot();
       
-      // Create all API calls as promises for parallel execution
+      // Cache settings
+      const maxAge = isToday ? 15000 : 300000; // 15 seconds for today, 5 minutes for historical
+      
+      // Check cache first
+      const cachedEntry = dataCache.consumption.get(cacheKey);
+      if (!forceRefresh && cachedEntry && isCacheValid(cachedEntry, maxAge)) {
+        // For today, check if we need to refresh priority slots
+        if (isToday) {
+          const prioritySlots = getSlotsToRefresh(isToday, currentSlot);
+          const needsRefresh = prioritySlots.some(slot => !cachedEntry.slotNumbers.includes(slot));
+          
+          if (!needsRefresh) {
+            setConsumptionData(cachedEntry.data);
+            return;
+          }
+        } else {
+          setConsumptionData(cachedEntry.data);
+          return;
+        }
+      }
+
+      const { startTime: dayStartTime } = getISTTimeRange(date);
+      const consumptionMap: Record<number, number> = {
+        ...(cachedEntry?.data || {}) // Preserve existing cached data
+      };
+      
+      // Determine which slots to fetch
+      let slotsToFetch: number[];
+      if (isToday && cachedEntry) {
+        // Only fetch priority slots for today
+        slotsToFetch = getSlotsToRefresh(isToday, currentSlot);
+      } else {
+        // Fetch all slots for historical dates or first load
+        slotsToFetch = Array.from({ length: 96 }, (_, i) => i + 1);
+      }
+      
+      // Create API calls only for slots that need updating
       const apiCalls = [];
       
-      for (let slot = 1; slot <= 96; slot++) {
+      for (const slot of slotsToFetch) {
         // Calculate 15-minute slot time range in UTC
         const slotStartUTC = new Date(dayStartTime.getTime() + (slot - 1) * 15 * 60 * 1000);
         const slotEndUTC = new Date(dayStartTime.getTime() + slot * 15 * 60 * 1000);
@@ -467,6 +543,18 @@ export default function TrendAnalysis() {
         }
       });
       
+      // Update cache
+      const allSlotNumbers = [...new Set([
+        ...(cachedEntry?.slotNumbers || []),
+        ...slotsToFetch
+      ])];
+      
+      dataCache.consumption.set(cacheKey, {
+        data: consumptionMap,
+        timestamp: Date.now(),
+        slotNumbers: allSlotNumbers
+      });
+      
       setConsumptionData(consumptionMap);
       
     } catch (error) {
@@ -474,13 +562,25 @@ export default function TrendAnalysis() {
     }
   };
 
-  // Function to fetch prediction data from API
-  const fetchPredictionData = async (date: Date) => {
+  // Function to fetch prediction data from API with caching
+  const fetchPredictionData = async (date: Date, forceRefresh = false) => {
     setIsLoading(true);
     try {
-      const { startTime, endTime } = getISTTimeRange(date);
+      const cacheKey = getCacheKey(date);
+      const isToday = isSelectedDateToday();
       
+      // Cache settings - prediction data changes less frequently
+      const maxAge = isToday ? 30000 : 600000; // 30 seconds for today, 10 minutes for historical
+      
+      // Check cache first
+      const cachedEntry = dataCache.prediction.get(cacheKey);
+      if (!forceRefresh && cachedEntry && isCacheValid(cachedEntry, maxAge)) {
+        setPredictionData(cachedEntry.data);
+        setIsLoading(false);
+        return;
+      }
 
+      const { startTime, endTime } = getISTTimeRange(date);
       
       // Initialize DataAccess - TODO: Replace with actual credentials
       const dataAccess = new DataAccess({
@@ -489,8 +589,6 @@ export default function TrendAnalysis() {
         dsUrl: "datads-ext.iosense.io", // TODO: Replace with actual DS URL
         tz: "UTC" // IST timezone
       });
-      
-      
 
       const result = await dataAccess.dataQuery({
         deviceId: "JSWDLV_PREDICTION",
@@ -502,39 +600,41 @@ export default function TrendAnalysis() {
         unix: false
       });
       
-        
-        
-        // Map the result to time slots (assuming 96 slots for 24 hours)
-        const dataMap: Record<number, number> = {};
-        
-        if (result && result.length > 0) {
-          
-          // Process the data and map to time slots
-          result.forEach((dataPoint: any, index: number) => {
+      // Map the result to time slots (assuming 96 slots for 24 hours)
+      const dataMap: Record<number, number> = {};
+      
+      if (result && result.length > 0) {
+        // Process the data and map to time slots
+        result.forEach((dataPoint: any, index: number) => {
+          if (dataPoint.timestamp && dataPoint.D2 !== null && dataPoint.D2 !== undefined) {
+            const time = new Date(dataPoint.timestamp);
             
-            if (dataPoint.timestamp && dataPoint.D2 !== null && dataPoint.D2 !== undefined) {
-              const time = new Date(dataPoint.timestamp);
-              
-              // Convert UTC time to IST for slot calculation
-              const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
-              // const istTime = new Date(time.getTime() + istOffset);
-              const istTime = new Date(time.getTime());
-              const hour = istTime.getHours();
-              const minute = istTime.getMinutes();
-              
-                              // Calculate slot number (96 slots for 24 hours, 15-minute intervals)
-                const slotNumber = Math.floor((hour * 60 + minute) / 15) + 1;
-              
+            // Convert UTC time to IST for slot calculation
+            const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+            // const istTime = new Date(time.getTime() + istOffset);
+            const istTime = new Date(time.getTime());
+            const hour = istTime.getHours();
+            const minute = istTime.getMinutes();
+            
+            // Calculate slot number (96 slots for 24 hours, 15-minute intervals)
+            const slotNumber = Math.floor((hour * 60 + minute) / 15) + 1;
 
-              
-              if (slotNumber >= 1 && slotNumber <= 96) {
-                dataMap[slotNumber] = parseFloat(dataPoint.D2) || 0;
-              }
+            if (slotNumber >= 1 && slotNumber <= 96) {
+              dataMap[slotNumber] = parseFloat(dataPoint.D2) || 0;
             }
-          });
-                  }
-          
-          setPredictionData(dataMap);
+          }
+        });
+      }
+
+      // Update cache
+      const allSlotNumbers = Array.from({ length: 96 }, (_, i) => i + 1);
+      dataCache.prediction.set(cacheKey, {
+        data: dataMap,
+        timestamp: Date.now(),
+        slotNumbers: allSlotNumbers
+      });
+      
+      setPredictionData(dataMap);
     } catch (error) {
       setPredictionData({});
     } finally {
@@ -549,7 +649,7 @@ export default function TrendAnalysis() {
     fetchConsumptionData(selectedDate);
   }, [selectedDate]);
 
-  // Auto-refresh data every 5 minutes (only when viewing today's date)
+  // Auto-refresh data with optimized intervals (only when viewing today's date)
   useEffect(() => {
     if (!isSelectedDateToday()) {
       return; // Don't auto-refresh for historical dates
@@ -558,9 +658,10 @@ export default function TrendAnalysis() {
     const refreshInterval = setInterval(() => {
       console.log('Auto-refreshing data...');
       setLastRefreshTime(new Date());
-      fetchPredictionData(selectedDate);
-      fetchConsumptionData(selectedDate);
-    }, 300000); // 5 minutes
+      // Force refresh to get latest data for current/next time slots
+      fetchPredictionData(selectedDate, true);
+      fetchConsumptionData(selectedDate, true);
+    }, 15000); // 15 seconds for optimized real-time updates
 
     // Cleanup interval on unmount or when date changes
     return () => {
