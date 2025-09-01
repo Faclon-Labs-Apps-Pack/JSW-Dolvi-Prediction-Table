@@ -988,7 +988,7 @@ export default function TrendAnalysis() {
                     // Highlights only the last slot (current + 2) in Final Prediction (MW) column
                     // BUT only if the slot has actual data (not "-")
                     const shouldHighlightFinalPredictionMW = currentTimeSlot !== null && 
-                      slot.slotNo === currentTimeSlot + 2 &&
+                      slot.slotNo === currentTimeSlot + 3 &&
                       predictionData[slot.slotNo] !== undefined
                     
                     return (
