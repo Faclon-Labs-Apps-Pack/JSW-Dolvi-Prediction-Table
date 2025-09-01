@@ -184,10 +184,10 @@ function formatDate(date: Date, format: string): string {
 
 // Function to determine zone based on time
 function getZone(hour: number): string {
-  if (hour >= 22 || hour < 6) return "Zone A"
-  if ((hour >= 6 && hour < 9) || (hour >= 12 && hour < 18)) return "Zone B"
-  if (hour >= 9 && hour < 12) return "Zone C"
-  if (hour >= 18 && hour < 22) return "Zone D"
+  if (hour >= 0 && hour < 6) return "Zone A"
+  if (hour >= 6 && hour < 9) return "Zone B"
+  if (hour >= 9 && hour < 17) return "Zone C"
+  if (hour >= 17 && hour < 24) return "Zone D"
   return "Zone A"
 }
 
@@ -240,14 +240,14 @@ function exportToExcel(data: any[], selectedDate: Date, predictionData: Record<n
     "Time Slot": slot.timeSlot,
     "Slot No.": `Slot ${slot.slotNo.toString().padStart(2, "0")}`,
     "Final Prediction (kWh)": predictionData[slot.slotNo] !== undefined ? predictionData[slot.slotNo].toFixed(1) : "-",
-    "Total Injection Units (After loss-5.18%)": predictionData[slot.slotNo] !== undefined ? (predictionData[slot.slotNo] * 0.9681).toFixed(2) : "-",
+    "Total Injection Units (After loss-5.18%)": predictionData[slot.slotNo] !== undefined ? (predictionData[slot.slotNo] * 0.9672).toFixed(2) : "-",
     "Actual Consumption (kWh)": consumptionData[slot.slotNo] !== undefined ? consumptionData[slot.slotNo].toFixed(2) : "-",
     "Final Prediction (MW)": predictionData[slot.slotNo] !== undefined ? (predictionData[slot.slotNo] / 250).toFixed(2) : "-",
     "Actual Consumption (MW)": consumptionData[slot.slotNo] !== undefined ? (consumptionData[slot.slotNo] / 250).toFixed(2) : "-",
     "Capped Actual Consumption (kWh)": consumptionData[slot.slotNo] !== undefined ? Math.min(4643, consumptionData[slot.slotNo]).toFixed(1) : "-",
     "Over Injection (kWh)": (() => {
       if (predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined) {
-        const totalInjection = predictionData[slot.slotNo] * 0.9681;
+        const totalInjection = predictionData[slot.slotNo] * 0.9672;
         const actualConsumption = consumptionData[slot.slotNo];
         const overInjection = Math.max(0, totalInjection - actualConsumption);
         return overInjection.toFixed(1);
@@ -256,7 +256,7 @@ function exportToExcel(data: any[], selectedDate: Date, predictionData: Record<n
     })(),
     "MSEB (₹)": (() => {
       if (predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined) {
-        const totalInjection = predictionData[slot.slotNo] * 0.9681;
+        const totalInjection = predictionData[slot.slotNo] * 0.9672;
         const actualConsumption = consumptionData[slot.slotNo];
         const mseb = Math.max(0, actualConsumption - totalInjection);
         return mseb.toFixed(1);
@@ -866,7 +866,7 @@ export default function TrendAnalysis() {
                     >
                       <div className="text-center leading-tight">
                         <div>Total Injection</div>
-                        <div>(After 3.18% loss)</div>
+                        <div>(After 3.28% loss)</div>
                         <div>(kWh)</div>
                       </div>
                     </th>
@@ -956,7 +956,7 @@ export default function TrendAnalysis() {
                     let msebValue = 0;
                     
                     if (!isLoading && predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined) {
-                      const totalInjection = predictionData[slot.slotNo] * 0.9681;
+                      const totalInjection = predictionData[slot.slotNo] * 0.9672;
                       const actualConsumption = consumptionData[slot.slotNo];
                       const overInjection = Math.max(0, totalInjection - actualConsumption);
                       const mseb = Math.max(0, actualConsumption - totalInjection);
@@ -985,11 +985,10 @@ export default function TrendAnalysis() {
                     const isCurrentTimeSlot = currentTimeSlot !== null && slot.slotNo === currentTimeSlot
                     
                     // Green highlighting ONLY works when viewing today's date (currentTimeSlot !== null)
-                    // Highlights current slot + next 3 slots in Final Prediction (MW) column
+                    // Highlights only the last slot (current + 2) in Final Prediction (MW) column
                     // BUT only if the slot has actual data (not "-")
                     const shouldHighlightFinalPredictionMW = currentTimeSlot !== null && 
-                      slot.slotNo >= currentTimeSlot && 
-                      slot.slotNo <= currentTimeSlot + 3 &&
+                      slot.slotNo === currentTimeSlot + 2 &&
                       predictionData[slot.slotNo] !== undefined
                     
                     return (
@@ -1040,7 +1039,7 @@ export default function TrendAnalysis() {
                           {isLoading ? 
                             "Loading..." : 
                             (predictionData[slot.slotNo] !== undefined ? 
-                              (predictionData[slot.slotNo] * 0.9681).toFixed(2) : 
+                              (predictionData[slot.slotNo] * 0.9672).toFixed(2) : 
                               "-"
                             )
                           }
