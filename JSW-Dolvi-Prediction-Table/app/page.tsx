@@ -560,7 +560,7 @@ export default function TrendAnalysis() {
       setLastRefreshTime(new Date());
       fetchPredictionData(selectedDate);
       fetchConsumptionData(selectedDate);
-    }, 300000); // 5 minutes
+    }, 30000); // 30 seconds
 
     // Cleanup interval on unmount or when date changes
     return () => {
@@ -573,6 +573,25 @@ export default function TrendAnalysis() {
   // currentTimeSlot will be null for any date that is NOT today - this disables both highlighting and auto-scroll
   const currentTimeSlot = isSelectedDateToday() ? getCurrentTimeSlot() : null
   const filteredSlots = timeSlots.filter((slot) => selectedZones.includes(slot.zone))
+  
+  // Find the latest slot with prediction data (most recent non-empty slot)
+  const getLatestDataSlot = () => {
+    if (!predictionData || Object.keys(predictionData).length === 0) return null
+    // Get all slots with data, sorted in ascending order
+    const slots = Object.keys(predictionData)
+      .map(Number)
+      .filter(slot => predictionData[slot] !== undefined && predictionData[slot] !== null)
+      .sort((a, b) => a - b)
+    
+    // Find the last continuous slot with data
+    let latestSlot = null
+    for (let i = 1; i <= 96; i++) {
+      if (predictionData[i] !== undefined && predictionData[i] !== null) {
+        latestSlot = i
+      }
+    }
+    return latestSlot
+  }
 
   // Sorting functionality
   const handleSort = (key: string) => {
@@ -644,6 +663,7 @@ export default function TrendAnalysis() {
   }
   
   const finalSlots = getSortedSlots()
+  const latestDataSlot = getLatestDataSlot()
   
   // Calculate totals for the filtered slots
   const calculateTotals = () => {
@@ -984,11 +1004,10 @@ export default function TrendAnalysis() {
                     // Check if this is the current time slot (only highlight if viewing today)
                     const isCurrentTimeSlot = currentTimeSlot !== null && slot.slotNo === currentTimeSlot
                     
-                    // Green highlighting ONLY works when viewing today's date (currentTimeSlot !== null)
-                    // Highlights only the last slot (current + 2) in Final Prediction (MW) column
-                    // BUT only if the slot has actual data (not "-")
-                    const shouldHighlightFinalPredictionMW = currentTimeSlot !== null && 
-                      slot.slotNo === currentTimeSlot + 3 &&
+                    // Green highlighting based on latest data slot
+                    // Highlights only the slot with the latest prediction data in Final Prediction (MW) column
+                    const shouldHighlightFinalPredictionMW = latestDataSlot !== null && 
+                      slot.slotNo === latestDataSlot &&
                       predictionData[slot.slotNo] !== undefined
                     
                     return (
