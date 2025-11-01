@@ -494,7 +494,7 @@ export default function TrendAnalysis() {
 
       const result = await dataAccess.dataQuery({
         deviceId: "JSWDLV_PREDICTION",
-        sensorList: ["D2"],
+        sensorList: ["D6"],
         startTime: startTime.toISOString(),
         endTime: endTime.toISOString(),
         cal: true,
@@ -511,24 +511,24 @@ export default function TrendAnalysis() {
           
           // Process the data and map to time slots
           result.forEach((dataPoint: any, index: number) => {
-            
-            if (dataPoint.timestamp && dataPoint.D2 !== null && dataPoint.D2 !== undefined) {
+
+            if (dataPoint.timestamp && dataPoint.D6 !== null && dataPoint.D6 !== undefined) {
               const time = new Date(dataPoint.timestamp);
-              
+
               // Convert UTC time to IST for slot calculation
               const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
               // const istTime = new Date(time.getTime() + istOffset);
               const istTime = new Date(time.getTime());
               const hour = istTime.getHours();
               const minute = istTime.getMinutes();
-              
+
                               // Calculate slot number (96 slots for 24 hours, 15-minute intervals)
                 const slotNumber = Math.floor((hour * 60 + minute) / 15) + 1;
-              
 
-              
+
+
               if (slotNumber >= 1 && slotNumber <= 96) {
-                dataMap[slotNumber] = parseFloat(dataPoint.D2) || 0;
+                dataMap[slotNumber] = parseFloat(dataPoint.D6) || 0;
               }
             }
           });
@@ -759,9 +759,10 @@ export default function TrendAnalysis() {
         {/* Main Container */}
         <div className="bg-white rounded-lg shadow-sm h-full flex flex-col">
           {/* Header */}
-          <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-            <h1 className="text-2xl font-bold text-gray-900">Trend Analysis</h1>
-            <div className="flex items-center gap-4">
+          <div className="p-6 border-b border-gray-200">
+            <div className="flex items-center justify-between mb-3">
+              <h1 className="text-2xl font-bold text-gray-900">Trend Analysis</h1>
+              <div className="flex items-center gap-4">
               {/* Date Picker */}
               <div className="relative" ref={datePickerRef}>
                 <button
@@ -799,6 +800,13 @@ export default function TrendAnalysis() {
               >
                 <Download className="h-4 w-4" />
               </Button>
+              </div>
+            </div>
+            {/* Note about 2 MW reduction */}
+            <div className="mt-3 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-md">
+              <p className="text-sm text-blue-900">
+                <span className="font-semibold">Note:</span> 2 MW has been reduced from the final prediction for Zone C due to lower MSEB tariff rates since 1st November, 2025.
+              </p>
             </div>
           </div>
 
