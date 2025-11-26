@@ -508,31 +508,44 @@ export default function TrendAnalysis() {
         const dataMap: Record<number, number> = {};
         
         if (result && result.length > 0) {
-          
+
+          // Get the selected date boundaries for filtering
+          const selectedYear = date.getFullYear();
+          const selectedMonth = date.getMonth();
+          const selectedDay = date.getDate();
+
           // Process the data and map to time slots
           result.forEach((dataPoint: any, index: number) => {
 
             if (dataPoint.timestamp && dataPoint.D6 !== null && dataPoint.D6 !== undefined) {
               const time = new Date(dataPoint.timestamp);
 
-              // Convert UTC time to IST for slot calculation
-              const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
-              // const istTime = new Date(time.getTime() + istOffset);
-              const istTime = new Date(time.getTime());
-              const hour = istTime.getHours();
-              const minute = istTime.getMinutes();
+              // Convert UTC time to local time for slot calculation
+              const localTime = new Date(time.getTime());
+              const hour = localTime.getHours();
+              const minute = localTime.getMinutes();
 
-                              // Calculate slot number (96 slots for 24 hours, 15-minute intervals)
-                const slotNumber = Math.floor((hour * 60 + minute) / 15) + 1;
+              // IMPORTANT: Filter out data points that don't belong to the selected date
+              // This prevents data from the next day (e.g., Nov 15 00:00) overwriting
+              // data from the selected day (e.g., Nov 14 00:00)
+              const dataYear = localTime.getFullYear();
+              const dataMonth = localTime.getMonth();
+              const dataDay = localTime.getDate();
 
+              if (dataYear !== selectedYear || dataMonth !== selectedMonth || dataDay !== selectedDay) {
+                // Skip data points that don't match the selected date
+                return;
+              }
 
+              // Calculate slot number (96 slots for 24 hours, 15-minute intervals)
+              const slotNumber = Math.floor((hour * 60 + minute) / 15) + 1;
 
               if (slotNumber >= 1 && slotNumber <= 96) {
                 dataMap[slotNumber] = parseFloat(dataPoint.D6) || 0;
               }
             }
           });
-                  }
+        }
           
           setPredictionData(dataMap);
     } catch (error) {
