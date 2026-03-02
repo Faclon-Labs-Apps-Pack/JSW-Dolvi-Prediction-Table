@@ -4,8 +4,9 @@ import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Download, CalendarIcon, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Filter } from "lucide-react"
 import { cn } from "@/lib/utils"
-import * as XLSX from "xlsx"
-import { DataAccess } from "connector-userid-ts"
+import ExcelJS from "exceljs"
+
+const LOSS_FACTOR = 0.9672 // 3.28% transmission loss
 
 // Custom Calendar Component
 function CustomCalendar({
@@ -233,87 +234,87 @@ function generateTimeSlots() {
 }
 
 // --- helper to export the visible data to Excel (browser-safe)
-function exportToExcel(data: any[], selectedDate: Date, predictionData: Record<number, number>, consumptionData: Record<number, number>) {
-  // 1. shape the data
-  const rows = data.map((slot) => ({
-    Zone: slot.zone,
-    "Time Slot": slot.timeSlot,
-    "Slot No.": `Slot ${slot.slotNo.toString().padStart(2, "0")}`,
-    "Final Prediction (kWh)": predictionData[slot.slotNo] !== undefined ? predictionData[slot.slotNo].toFixed(1) : "-",
-    "Total Injection Units (After loss-5.18%)": predictionData[slot.slotNo] !== undefined ? (predictionData[slot.slotNo] * 0.9672).toFixed(2) : "-",
-    "Actual Consumption (kWh)": consumptionData[slot.slotNo] !== undefined ? consumptionData[slot.slotNo].toFixed(2) : "-",
-    "Final Prediction (MW)": predictionData[slot.slotNo] !== undefined ? (predictionData[slot.slotNo] / 250).toFixed(2) : "-",
-    "Actual Consumption (MW)": consumptionData[slot.slotNo] !== undefined ? (consumptionData[slot.slotNo] / 250).toFixed(2) : "-",
-    "Capped Actual Consumption (kWh)": consumptionData[slot.slotNo] !== undefined ? Math.min(4643, consumptionData[slot.slotNo]).toFixed(1) : "-",
-    "Over Injection (kWh)": (() => {
-      if (predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined) {
-        const totalInjection = predictionData[slot.slotNo] * 0.9672;
-        const actualConsumption = consumptionData[slot.slotNo];
-        const overInjection = Math.max(0, totalInjection - actualConsumption);
-        return overInjection.toFixed(1);
-      }
-      return "-";
-    })(),
-    "MSEB (₹)": (() => {
-      if (predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined) {
-        const totalInjection = predictionData[slot.slotNo] * 0.9672;
-        const actualConsumption = consumptionData[slot.slotNo];
-        const mseb = Math.max(0, actualConsumption - totalInjection);
-        return mseb.toFixed(1);
-      }
-      return "-";
-    })(),
-  }))
+async function exportToExcel(data: any[], selectedDate: Date, predictionData: Record<number, number>, consumptionData: Record<number, number>) {
+  const workbook = new ExcelJS.Workbook()
+  const worksheet = workbook.addWorksheet("Trend Analysis")
 
-  // Calculate totals for the exported data
+  worksheet.columns = [
+    { header: "Zone", key: "zone", width: 10 },
+    { header: "Time Slot", key: "timeSlot", width: 16 },
+    { header: "Slot No.", key: "slotNo", width: 10 },
+    { header: "Final Prediction (kWh)", key: "predKwh", width: 22 },
+    { header: "Total Injection Units (After 3.28% loss)", key: "injection", width: 36 },
+    { header: "Actual Consumption (kWh)", key: "actualKwh", width: 24 },
+    { header: "Final Prediction (MW)", key: "predMw", width: 22 },
+    { header: "Actual Consumption (MW)", key: "actualMw", width: 22 },
+    { header: "Capped Actual Consumption (kWh)", key: "capped", width: 30 },
+    { header: "Over Injection (kWh)", key: "overInj", width: 20 },
+    { header: "MSEB (₹)", key: "mseb", width: 14 },
+  ]
+
+  data.forEach((slot) => {
+    const hasPred = predictionData[slot.slotNo] !== undefined
+    const hasCons = consumptionData[slot.slotNo] !== undefined
+    const pred = hasPred ? predictionData[slot.slotNo] : null
+    const cons = hasCons ? consumptionData[slot.slotNo] : null
+    const injection = pred !== null ? pred * LOSS_FACTOR : null
+
+    worksheet.addRow({
+      zone: slot.zone,
+      timeSlot: slot.timeSlot,
+      slotNo: `Slot ${slot.slotNo.toString().padStart(2, "0")}`,
+      predKwh: pred !== null ? pred.toFixed(1) : "-",
+      injection: injection !== null ? injection.toFixed(2) : "-",
+      actualKwh: cons !== null ? cons.toFixed(2) : "-",
+      predMw: pred !== null ? (pred / 250).toFixed(2) : "-",
+      actualMw: cons !== null ? (cons / 250).toFixed(2) : "-",
+      capped: cons !== null ? Math.min(4643, cons).toFixed(1) : "-",
+      overInj:
+        injection !== null && cons !== null
+          ? Math.max(0, injection - cons).toFixed(1)
+          : "-",
+      mseb:
+        injection !== null && cons !== null
+          ? Math.max(0, cons - injection).toFixed(1)
+          : "-",
+    })
+  })
+
+  // Calculate and add totals row
   let totalActualConsumption = 0
   let totalOverInjection = 0
   let totalMSEB = 0
   let validDataCount = 0
-  
+
   data.forEach((slot) => {
     if (predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined) {
       const actualConsumption = consumptionData[slot.slotNo]
-      const totalInjection = predictionData[slot.slotNo] * 0.9681
-      const overInjection = Math.max(0, totalInjection - actualConsumption)
-      const mseb = Math.max(0, actualConsumption - totalInjection)
-      
+      const totalInjection = predictionData[slot.slotNo] * LOSS_FACTOR
       totalActualConsumption += actualConsumption
-      totalOverInjection += overInjection
-      totalMSEB += mseb
+      totalOverInjection += Math.max(0, totalInjection - actualConsumption)
+      totalMSEB += Math.max(0, actualConsumption - totalInjection)
       validDataCount++
     }
   })
 
-  // Add totals row
-  const totalsRow = {
-    Zone: "TOTAL",
-    "Time Slot": "-",
-    "Slot No.": "-",
-    "Final Prediction (kWh)": "-",
-    "Total Injection Units (After loss-5.18%)": "-",
-    "Actual Consumption (kWh)": validDataCount > 0 ? totalActualConsumption.toFixed(2) : "-",
-    "Final Prediction (MW)": "-",
-    "Actual Consumption (MW)": "-",
-    "Capped Actual Consumption (kWh)": "-",
-    "Over Injection (kWh)": validDataCount > 0 ? totalOverInjection.toFixed(1) : "-",
-    "MSEB (₹)": validDataCount > 0 ? totalMSEB.toFixed(1) : "-",
-  }
+  worksheet.addRow({
+    zone: "TOTAL",
+    timeSlot: "-",
+    slotNo: "-",
+    predKwh: "-",
+    injection: "-",
+    actualKwh: validDataCount > 0 ? totalActualConsumption.toFixed(2) : "-",
+    predMw: "-",
+    actualMw: "-",
+    capped: "-",
+    overInj: validDataCount > 0 ? totalOverInjection.toFixed(1) : "-",
+    mseb: validDataCount > 0 ? totalMSEB.toFixed(1) : "-",
+  })
 
-  // Add the totals row to the data
-  rows.push(totalsRow)
-
-  // 2. build workbook / worksheet
-  const wb = XLSX.utils.book_new()
-  const ws = XLSX.utils.json_to_sheet(rows)
-  XLSX.utils.book_append_sheet(wb, ws, "Trend Analysis")
-
-  // 3. write to an ArrayBuffer
-  const wbArrayBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" })
-
-  // 4. create a Blob and trigger download
-  const blob = new Blob([wbArrayBuffer], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8",
+  // Generate and download
+  const buffer = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   })
   const url = URL.createObjectURL(blob)
   const link = document.createElement("a")
@@ -474,80 +475,58 @@ export default function TrendAnalysis() {
     }
   };
 
-  // Function to fetch prediction data from API
+  // Function to fetch prediction data from server API route
   const fetchPredictionData = async (date: Date) => {
     setIsLoading(true);
     try {
       const { startTime, endTime } = getISTTimeRange(date);
-      
 
-      
-      // Initialize DataAccess - TODO: Replace with actual credentials
-      const dataAccess = new DataAccess({
-        userId: "67e275d00faafe50ca744b29", // TODO: Replace with actual user ID
-        dataUrl: "datads-ext.iosense.io", // TODO: Replace with actual data URL
-        dsUrl: "datads-ext.iosense.io", // TODO: Replace with actual DS URL
-        tz: "UTC" // IST timezone
+      const response = await fetch("/predictionTable/api/prediction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          startTime: startTime.toISOString(),
+          endTime: endTime.toISOString(),
+        }),
       });
-      
-      
 
-      const result = await dataAccess.dataQuery({
-        deviceId: "JSWDLV_PREDICTION",
-        sensorList: ["D6"],
-        startTime: startTime.toISOString(),
-        endTime: endTime.toISOString(),
-        cal: true,
-        alias: false,
-        unix: false
-      });
-      
-        
-        
-        // Map the result to time slots (assuming 96 slots for 24 hours)
-        const dataMap: Record<number, number> = {};
-        
-        if (result && result.length > 0) {
+      if (!response.ok) throw new Error("Prediction API failed");
 
-          // Get the selected date boundaries for filtering
-          const selectedYear = date.getFullYear();
-          const selectedMonth = date.getMonth();
-          const selectedDay = date.getDate();
+      const { data: result } = await response.json();
 
-          // Process the data and map to time slots
-          result.forEach((dataPoint: any, index: number) => {
+      // Map the result to time slots (96 slots for 24 hours)
+      const dataMap: Record<number, number> = {};
 
-            if (dataPoint.timestamp && dataPoint.D6 !== null && dataPoint.D6 !== undefined) {
-              const time = new Date(dataPoint.timestamp);
+      if (result && result.length > 0) {
+        const selectedYear = date.getFullYear();
+        const selectedMonth = date.getMonth();
+        const selectedDay = date.getDate();
 
-              // Convert UTC time to local time for slot calculation
-              const localTime = new Date(time.getTime());
-              const hour = localTime.getHours();
-              const minute = localTime.getMinutes();
+        result.forEach((dataPoint: any) => {
+          if (dataPoint.timestamp && dataPoint.D6 !== null && dataPoint.D6 !== undefined) {
+            const time = new Date(dataPoint.timestamp);
+            const localTime = new Date(time.getTime());
+            const hour = localTime.getHours();
+            const minute = localTime.getMinutes();
 
-              // IMPORTANT: Filter out data points that don't belong to the selected date
-              // This prevents data from the next day (e.g., Nov 15 00:00) overwriting
-              // data from the selected day (e.g., Nov 14 00:00)
-              const dataYear = localTime.getFullYear();
-              const dataMonth = localTime.getMonth();
-              const dataDay = localTime.getDate();
-
-              if (dataYear !== selectedYear || dataMonth !== selectedMonth || dataDay !== selectedDay) {
-                // Skip data points that don't match the selected date
-                return;
-              }
-
-              // Calculate slot number (96 slots for 24 hours, 15-minute intervals)
-              const slotNumber = Math.floor((hour * 60 + minute) / 15) + 1;
-
-              if (slotNumber >= 1 && slotNumber <= 96) {
-                dataMap[slotNumber] = parseFloat(dataPoint.D6) || 0;
-              }
+            // Filter out data points that don't belong to the selected date
+            if (
+              localTime.getFullYear() !== selectedYear ||
+              localTime.getMonth() !== selectedMonth ||
+              localTime.getDate() !== selectedDay
+            ) {
+              return;
             }
-          });
-        }
-          
-          setPredictionData(dataMap);
+
+            const slotNumber = Math.floor((hour * 60 + minute) / 15) + 1;
+            if (slotNumber >= 1 && slotNumber <= 96) {
+              dataMap[slotNumber] = parseFloat(dataPoint.D6) || 0;
+            }
+          }
+        });
+      }
+
+      setPredictionData(dataMap);
     } catch (error) {
       setPredictionData({});
     } finally {
@@ -640,12 +619,12 @@ export default function TrendAnalysis() {
         case 'overInjection':
           // Calculate over injection for sorting
           if (predictionData[a.slotNo] !== undefined && consumptionData[a.slotNo] !== undefined) {
-            const totalInjectionA = predictionData[a.slotNo] * 0.9681
+            const totalInjectionA = predictionData[a.slotNo] * LOSS_FACTOR
             const actualConsumptionA = consumptionData[a.slotNo]
             aValue = Math.max(0, totalInjectionA - actualConsumptionA)
           }
           if (predictionData[b.slotNo] !== undefined && consumptionData[b.slotNo] !== undefined) {
-            const totalInjectionB = predictionData[b.slotNo] * 0.9681
+            const totalInjectionB = predictionData[b.slotNo] * LOSS_FACTOR
             const actualConsumptionB = consumptionData[b.slotNo]
             bValue = Math.max(0, totalInjectionB - actualConsumptionB)
           }
@@ -653,12 +632,12 @@ export default function TrendAnalysis() {
         case 'mseb':
           // Calculate MSEB for sorting
           if (predictionData[a.slotNo] !== undefined && consumptionData[a.slotNo] !== undefined) {
-            const totalInjectionA = predictionData[a.slotNo] * 0.9681
+            const totalInjectionA = predictionData[a.slotNo] * LOSS_FACTOR
             const actualConsumptionA = consumptionData[a.slotNo]
             aValue = Math.max(0, actualConsumptionA - totalInjectionA)
           }
           if (predictionData[b.slotNo] !== undefined && consumptionData[b.slotNo] !== undefined) {
-            const totalInjectionB = predictionData[b.slotNo] * 0.9681
+            const totalInjectionB = predictionData[b.slotNo] * LOSS_FACTOR
             const actualConsumptionB = consumptionData[b.slotNo]
             bValue = Math.max(0, actualConsumptionB - totalInjectionB)
           }
@@ -688,7 +667,7 @@ export default function TrendAnalysis() {
     finalSlots.forEach((slot) => {
       if (!isLoading && predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined) {
         const actualConsumption = consumptionData[slot.slotNo]
-        const totalInjection = predictionData[slot.slotNo] * 0.9681
+        const totalInjection = predictionData[slot.slotNo] * LOSS_FACTOR
         const overInjection = Math.max(0, totalInjection - actualConsumption)
         const mseb = Math.max(0, actualConsumption - totalInjection)
         
@@ -997,7 +976,7 @@ export default function TrendAnalysis() {
                     let msebValue = 0;
                     
                     if (!isLoading && predictionData[slot.slotNo] !== undefined && consumptionData[slot.slotNo] !== undefined) {
-                      const totalInjection = predictionData[slot.slotNo] * 0.9672;
+                      const totalInjection = predictionData[slot.slotNo] * LOSS_FACTOR;
                       const actualConsumption = consumptionData[slot.slotNo];
                       const overInjection = Math.max(0, totalInjection - actualConsumption);
                       const mseb = Math.max(0, actualConsumption - totalInjection);
@@ -1079,7 +1058,7 @@ export default function TrendAnalysis() {
                           {isLoading ? 
                             "Loading..." : 
                             (predictionData[slot.slotNo] !== undefined ? 
-                              (predictionData[slot.slotNo] * 0.9672).toFixed(2) : 
+                              (predictionData[slot.slotNo] * LOSS_FACTOR).toFixed(2) : 
                               "-"
                             )
                           }
