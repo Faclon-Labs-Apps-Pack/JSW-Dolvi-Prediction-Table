@@ -5,6 +5,11 @@ import { Button } from "@/components/ui/button"
 import { Download, CalendarIcon, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Filter } from "lucide-react"
 import { cn } from "@/lib/utils"
 import ExcelJS from "exceljs"
+import { getStoredToken, clearToken } from "@/iosense-sdk/auth/ssoAuth"
+import {
+  fetchPredictionData as sdkFetchPrediction,
+  fetchConsumptionData as sdkFetchConsumption,
+} from "@/iosense-sdk/data/dataFetcher"
 
 const LOSS_FACTOR = 0.9672 // 3.28% transmission loss
 
@@ -362,171 +367,33 @@ export default function TrendAnalysis() {
     return selectedDate.toDateString() === today.toDateString()
   }
 
-  // Function to convert date to IST and get start/end times for API query
-  const getISTTimeRange = (date: Date) => {
-    // Create IST date range (user selected date in IST)
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const day = date.getDate();
-    
-    // IST start: 6th July 00:00 IST
-    const istStart = new Date(year, month, day, 0, 0, 0, 0);
-    
-    // IST end: 7th July 00:00 IST  
-    const istEnd = new Date(year, month, day + 1, 0, 0, 0, 0);
-    
-    // Convert IST to UTC for API query
-    // IST is UTC+5:30, so subtract 5.5 hours to get UTC
-    // const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
-    // const utcStart = new Date(istStart.getTime() - istOffset);
-    // const utcEnd = new Date(istEnd.getTime() - istOffset);
-    
-    
-    
-    return {
-      startTime: istStart,
-      endTime: istEnd
-    };
-  };
 
-  // Function to fetch consumption data from new API endpoint
+  // Fetch consumption data via IOsense SDK (2 authenticated requests for the whole day)
   const fetchConsumptionData = async (date: Date) => {
+    const token = getStoredToken()
+    if (!token) return
     try {
-      const { startTime: dayStartTime } = getISTTimeRange(date);
-      const consumptionMap: Record<number, number> = {};
-      
-      // Create all API calls as promises for parallel execution
-      const apiCalls = [];
-      
-      for (let slot = 1; slot <= 96; slot++) {
-        // Calculate 15-minute slot time range in UTC
-        const slotStartUTC = new Date(dayStartTime.getTime() + (slot - 1) * 15 * 60 * 1000);
-        const slotEndUTC = new Date(dayStartTime.getTime() + slot * 15 * 60 * 1000);
-        
-        const baseUrl = `https://datads-ext.iosense.io/api/apiLayer/getStartEndDPV2`;
-        
-        // Create D12 API call
-        const d12Params = new URLSearchParams({
-          device: "JSWDLV_A",
-          sensor: "D12",
-          startTime: slotStartUTC.getTime().toString(),
-          endTime: slotEndUTC.getTime().toString(),
-          disableThreshold: "true",
-          customIntervalInSec: "0"
-        });
-        
-        // Create D13 API call
-        const d13Params = new URLSearchParams({
-          device: "JSWDLV_A", 
-          sensor: "D13",
-          startTime: slotStartUTC.getTime().toString(),
-          endTime: slotEndUTC.getTime().toString(),
-          disableThreshold: "true",
-          customIntervalInSec: "0"
-        });
-        
-        // Add both API calls for this slot
-        apiCalls.push({
-          slot,
-          d12Promise: fetch(`${baseUrl}?${d12Params}`).then(res => res.json()),
-          d13Promise: fetch(`${baseUrl}?${d13Params}`).then(res => res.json())
-        });
+      const data = await sdkFetchConsumption(token, date)
+      setConsumptionData(data)
+    } catch (err: any) {
+      if (err?.message === "AUTH_EXPIRED") {
+        clearToken()
+        window.location.reload()
+        return
       }
-      
-      // Execute all API calls in parallel
-      const results = await Promise.all(
-        apiCalls.map(async ({ slot, d12Promise, d13Promise }) => {
-          try {
-            const [data1, data2] = await Promise.all([d12Promise, d13Promise]);
-            
-            // Calculate consumption: (endTime.value - startTime.value) for each sensor
-            let d12Consumption = 0;
-            let d13Consumption = 0;
-            
-            if (data1?.endTime?.value && data1?.startTime?.value) {
-              d12Consumption = parseFloat(data1.endTime.value) - parseFloat(data1.startTime.value);
-            }
-            
-            if (data2?.endTime?.value && data2?.startTime?.value) {
-              d13Consumption = parseFloat(data2.endTime.value) - parseFloat(data2.startTime.value);
-            }
-            
-            // Total consumption = D12 + D13
-            const totalConsumption = d12Consumption + d13Consumption;
-            
-            return { slot, totalConsumption };
-          } catch (error) {
-            return { slot, totalConsumption: 0 };
-          }
-        })
-      );
-      
-      // Process results into consumptionMap
-      results.forEach(({ slot, totalConsumption }) => {
-        if (totalConsumption > 0) {
-          consumptionMap[slot] = totalConsumption;
-        }
-      });
-      
-      setConsumptionData(consumptionMap);
-      
-    } catch (error) {
-      setConsumptionData({});
+      setConsumptionData({})
     }
-  };
+  }
 
-  // Function to fetch prediction data from server API route
+  // Fetch prediction data via IOsense SDK (1 authenticated request for the whole day)
   const fetchPredictionData = async (date: Date) => {
-    setIsLoading(true);
+    setIsLoading(true)
     try {
-      const { startTime, endTime } = getISTTimeRange(date);
+      const token = getStoredToken()
+      if (!token) return
 
-      const response = await fetch("/predictionTable/api/prediction", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          startTime: startTime.toISOString(),
-          endTime: endTime.toISOString(),
-        }),
-      });
-
-      if (!response.ok) throw new Error("Prediction API failed");
-
-      const { data: result } = await response.json();
-
-      // Map the result to time slots (96 slots for 24 hours)
-      const dataMap: Record<number, number> = {};
-
-      if (result && result.length > 0) {
-        const selectedYear = date.getFullYear();
-        const selectedMonth = date.getMonth();
-        const selectedDay = date.getDate();
-
-        result.forEach((dataPoint: any) => {
-          if (dataPoint.timestamp && dataPoint.D6 !== null && dataPoint.D6 !== undefined) {
-            const time = new Date(dataPoint.timestamp);
-            const localTime = new Date(time.getTime());
-            const hour = localTime.getHours();
-            const minute = localTime.getMinutes();
-
-            // Filter out data points that don't belong to the selected date
-            if (
-              localTime.getFullYear() !== selectedYear ||
-              localTime.getMonth() !== selectedMonth ||
-              localTime.getDate() !== selectedDay
-            ) {
-              return;
-            }
-
-            const slotNumber = Math.floor((hour * 60 + minute) / 15) + 1;
-            if (slotNumber >= 1 && slotNumber <= 96) {
-              dataMap[slotNumber] = parseFloat(dataPoint.D6) || 0;
-            }
-          }
-        });
-      }
-
-      setPredictionData(dataMap);
+      const result = await sdkFetchPrediction(token, date)
+      setPredictionData(result)
     } catch (error) {
       setPredictionData({});
     } finally {
@@ -548,7 +415,6 @@ export default function TrendAnalysis() {
     }
 
     const refreshInterval = setInterval(() => {
-      console.log('Auto-refreshing data...');
       setLastRefreshTime(new Date());
       fetchPredictionData(selectedDate);
       fetchConsumptionData(selectedDate);

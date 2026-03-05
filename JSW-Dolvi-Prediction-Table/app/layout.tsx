@@ -1,10 +1,10 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import { AuthGuard } from '@/components/AuthGuard'
 
 export const metadata: Metadata = {
-  title: 'v0 App',
-  description: 'Created with v0',
-  generator: 'v0.dev',
+  title: 'JSW Dolvi — Prediction Table',
+  description: 'Energy prediction and consumption trend analysis',
 }
 
 export default function RootLayout({
@@ -14,7 +14,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AuthGuard>{children}</AuthGuard>
+      </body>
     </html>
   )
 }
