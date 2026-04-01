@@ -660,12 +660,6 @@ export default function TrendAnalysis() {
               </Button>
               </div>
             </div>
-            {/* Note about 2 MW reduction */}
-            <div className="mt-3 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-md">
-              <p className="text-sm text-blue-900">
-                <span className="font-semibold">Note:</span> 2 MW has been reduced from the final prediction for Zone C due to lower MSEB tariff rates since 1st November, 2025.
-              </p>
-            </div>
           </div>
 
           {/* Table Container */}
